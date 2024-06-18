@@ -74,7 +74,7 @@ impl App {
         let tx = self.tx.clone();
         let listener = self.listener.try_clone()?;
         let server_task = tokio::spawn(async move {
-            Self::run_server(&listener,&tx)
+            Self::run_server(&listener,&tx).await
         });
 
         let rx_task = tokio::spawn(async move {
@@ -109,13 +109,12 @@ impl App {
     /// 
     /// # Errors
     /// `Error` - When an error occurs while running the server
-    pub fn run_server(listener: &TcpListener, tx: &mpsc::Sender<Error>) -> Result<()> {
+    pub async fn run_server(listener: &TcpListener, tx: &mpsc::Sender<Error>) -> Result<()> {
         for stream in listener.incoming() {
             match stream {
                 Ok(stream) => {
                     let clone_tx = tx.clone();
                     let mut handler = Handler::new(stream);
-                    tokio::spawn(async move {
                         match handler.process_stream() {
                             Ok(()) => {}
                             Err(e) => {
@@ -124,7 +123,6 @@ impl App {
                                 }
                             }
                         }
-                    });
                 }
                 Err(e) => {
                     println!("error: {e}");

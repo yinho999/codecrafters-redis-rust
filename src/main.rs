@@ -6,8 +6,7 @@ async fn main() -> redis_starter_rust::Result<()> {
     // You can use print statements as follows for debugging, they'll be visible when running tests.
 
     // Uncomment this block to pass the first stage
-    //
-    let mut app = App::new("127.0.0.1:6379", 100)?;
+    let mut app = App::new("127.0.0.1:6379", 100).await?;
     app.run().await?;
 
     Ok(())

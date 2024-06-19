@@ -1,5 +1,5 @@
-use std::io::{Read, Write};
-use std::net::TcpStream;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::net::TcpStream;
 
 pub struct Handler {
     stream: TcpStream,
@@ -31,7 +31,7 @@ impl Handler {
     /// 
     /// # Errors
     /// `Error` - When an error occurs while processing the stream
-    pub fn process_stream(&mut self) -> crate::Result<()> {
+    pub async fn process_stream(&mut self) -> crate::Result<()> {
         // Read stream
         // message buffer
         let mut buffer = [0; 512];
@@ -39,7 +39,7 @@ impl Handler {
         let mut msg = String::new();
         loop {
             // read bytes into buffer
-            let bytes_read = self.stream.read(&mut buffer)?;
+            let bytes_read = self.stream.read(&mut buffer).await?;
             // If there is no bytes read
             if bytes_read == 0 {
                 break;
@@ -48,9 +48,9 @@ impl Handler {
             msg.push_str(&String::from_utf8_lossy(&buffer[..bytes_read]));
             if msg.contains("PING\r\n") {
                 // Write the response to stream
-                self.stream.write_all(b"+PONG\r\n")?;
+                self.stream.write_all(b"+PONG\r\n").await?;
                 // flush the stream
-                self.stream.flush()?;
+                self.stream.flush().await ?;
                 msg.clear();
             }
         }

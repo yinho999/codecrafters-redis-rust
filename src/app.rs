@@ -1,12 +1,12 @@
 use crate::error::Error;
 use crate::handler::Handler;
 use crate::Result;
-use std::net::{TcpListener, ToSocketAddrs};
 use std::sync::Arc;
+use tokio::net::TcpListener;
 use tokio::sync::{mpsc, Mutex};
 
 pub struct App {
-    listener: TcpListener,
+    listener: Arc<TcpListener>,
     tx: mpsc::Sender<Error>,
     rx: Arc<Mutex<mpsc::Receiver<Error>>>,
 }
@@ -25,11 +25,14 @@ impl App {
     ///
     /// # Errors
     /// `Error` - When an error occurs while creating the application
-    pub fn new<A: ToSocketAddrs>(address: A, buffer: usize) -> Result<Self> {
-        let listener = TcpListener::bind(address)?;
+    pub async fn new<A: tokio::net::ToSocketAddrs + Send>(
+        address: A,
+        buffer: usize,
+    ) -> Result<Self> {
+        let listener = TcpListener::bind(address).await?;
         let (tx, rx) = mpsc::channel(buffer);
         Ok(Self {
-            listener,
+            listener: Arc::new(listener),
             tx,
             rx: Arc::new(Mutex::new(rx)),
         })
@@ -72,8 +75,8 @@ impl App {
     pub async fn run(&mut self) -> Result<()> {
         let rx = self.rx.clone();
         let tx = self.tx.clone();
-        let listener = self.listener.try_clone()?;
-        let server_task = Self::run_server(&listener, &tx);
+        let listener = self.listener.clone();
+        let server_task = tokio::spawn(async move { Self::run_server(&listener, &tx).await });
         let rx_task = tokio::spawn(async move {
             let mut rx = rx.lock().await;
             let mut errors = Vec::new();
@@ -85,9 +88,9 @@ impl App {
             }
             Ok(())
         });
-        
+
         tokio::select! {
-            res = server_task => res ,
+            res = server_task => res? ,
             res = rx_task => res?,
         }
     }
@@ -107,27 +110,20 @@ impl App {
     /// `Error` - When an error occurs while running the server
     #[allow(clippy::unused_async)]
     pub async fn run_server(listener: &TcpListener, tx: &mpsc::Sender<Error>) -> Result<()> {
-        for stream in listener.incoming() {
-            match stream {
-                Ok(stream) => {
-                    let clone_tx = tx.clone();
-                    let mut handler = Handler::new(stream);
-                    tokio::spawn(async move {
-                        match handler.process_stream() {
-                            Ok(()) => {}
-                            Err(e) => {
-                                if (clone_tx.send(e).await).is_err() {
-                                    println!("receiver has been drop, unable to send messages.");
-                                }
-                            }
+        loop {
+            let (stream, _) = listener.accept().await?;
+            let clone_tx = tx.clone();
+            let mut handler = Handler::new(stream);
+            tokio::spawn(async move {
+                match handler.process_stream().await {
+                    Ok(()) => {}
+                    Err(e) => {
+                        if (clone_tx.send(e).await).is_err() {
+                            println!("receiver has been drop, unable to send messages.");
                         }
-                    });
+                    }
                 }
-                Err(e) => {
-                    println!("error: {e}");
-                }
-            }
+            });
         }
-        Ok(())
     }
 }
